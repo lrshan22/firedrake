@@ -967,8 +967,7 @@ if mode == "install" or not args.update_script:
                             "python3-pip",
                             "python3-tk",
                             "python3-venv",
-                            "zlib1g-dev",
-                            "opencl-headers"]
+                            "zlib1g-dev"]
 
             missing_packages = [p for p in apt_packages if not apt_check(p)]
             if missing_packages:
