@@ -173,12 +173,13 @@ def compile_element(expression, parameters=None):
 
     try:
         arg, = extract_coefficients(expression)
-        argument_multiindex = ()
+        argument_multiindices = ()
         coefficient = True
     except ValueError:
         arg, = extract_arguments(expression)
         finat_elem = create_element(arg.ufl_element())
-        argument_multiindex = (finat_elem.get_indices(), )
+        argument_multiindices = (finat_elem.get_indices(), )
+        argument_multiindex, = argument_multiindices
         coefficient = False
 
     # # Point evaluation of mixed coefficients not supported here
@@ -210,7 +211,7 @@ def compile_element(expression, parameters=None):
                   precision=parameters["precision"],
                   point_indices=(),
                   point_expr=point,
-                  argument_multiindices=argument_multiindex)
+                  argument_multiindices=argument_multiindices)
     # TODO: restore this for expression evaluation!
     context = tsfc.fem.GemPointContext(**config)
 
@@ -218,6 +219,10 @@ def compile_element(expression, parameters=None):
     expression = tsfc.ufl_utils.simplify_abs(expression)
 
     # Translate UFL -> GEM
+    if coefficient:
+        f_arg = [builder._coefficient(arg, "f")]
+    else:
+        f_arg = []
     translator = tsfc.fem.Translator(context)
     result, = map_expr_dags(translator, [expression])
 
@@ -248,7 +253,7 @@ def compile_element(expression, parameters=None):
     body = generate_coffee(impero_c, {}, parameters["precision"])
 
     # Build kernel tuple
-    kernel_code = builder.construct_kernel("evaluate_kernel", [result_arg, point_arg], body)
+    kernel_code = builder.construct_kernel("evaluate_kernel", [result_arg] + f_arg + [point_arg], body)
 
     return kernel_code
 
@@ -262,19 +267,27 @@ def prolong_kernel(expression):
     evaluate_kernel = compile_element(expression)
     to_reference_kernel = to_reference_coordinates(coordinates.ufl_element())
 
+    eval_args = evaluate_kernel.args[:-1]
+
+    args = ", ".join(a.gencode(not_scope=True) for a in eval_args)
+    arg_names = ", ".join(a.sym.symbol for a in eval_args)
     my_kernel = """
     %(to_reference)s
     %(evaluate)s
-    void kernel(double R[%(ndof)d], const double X[%(gdim)d], const double *Xc)
+    #include <stdio.h>
+    void kernel(%(args)s, const double *X, const double *Xc)
     {
+        printf("Xphys: %%g %%g ", X[0], X[1]);
         double Xref[%(tdim)d];
         to_reference_coords_kernel(Xref, X, Xc);
-        evaluate_kernel(R, Xref);
+        printf("Xref: %%g %%g\\n", Xref[0], Xref[1]);
+        evaluate_kernel(%(arg_names)s, Xref);
+        printf("f: %%g %%g %%g R: %%g\\n", f[0], f[1], f[2], R[0]);
     }
     """ % {"to_reference": str(to_reference_kernel),
            "evaluate": str(evaluate_kernel),
-           "ndof": V.cell_node_map().arity * V.value_size,
-           "gdim": mesh.geometric_dimension(),
+           "args": args,
+           "arg_names": arg_names,
            "tdim": mesh.topological_dimension()}
 
     return op2.Kernel(my_kernel, name="kernel")
@@ -300,7 +313,7 @@ def check_arguments(coarse, fine):
 
 
 def prolong(input, output):
-
+    import firedrake
     coarse_V = input.function_space()
     fine_V = output.function_space()
     c2f_map = utils.coarse_to_fine_node_map(coarse_V, fine_V).values_with_halo
@@ -326,12 +339,17 @@ def prolong(input, output):
     map_from_fine_node_to_coarse_coordinate_nodes = op2.Map(output.node_set, coarse_coordinates.node_set, map_from_fine_node_to_coarse_coordinate_nodes.shape[1],
                                                             values=map_from_fine_node_to_coarse_coordinate_nodes)
 
-    from IPython import embed; embed()
+    kernel = prolong_kernel(input)
+    output.dat.zero()
+    # XXX: Should be able to figure out locations by pushing forward
+    # reference cell node locations to physical space.
+    Vf = firedrake.FunctionSpace(fine_V.ufl_domain(), firedrake.VectorElement(fine_V.ufl_element()))
+    input_node_physical_location = firedrake.interpolate(firedrake.SpatialCoordinate(fine_V.ufl_domain()), Vf)
     op2.par_loop(kernel, output.node_set,
-                 output.node_set(op2.WRITE),
-                 input.node_set(op2.READ, map_from_fine_node_to_coarse_nodes),
-                 input_node_physical_location(op2.READ),
-                 coarse_coordinates(op2.READ, map_from_fine_node_to_coarse_coordinate_nodes))
+                 output.dat(op2.WRITE),
+                 input.dat(op2.READ, map_from_fine_node_to_coarse_nodes[op2.i[0]]),
+                 input_node_physical_location.dat(op2.READ),
+                 coarse_coordinates.dat(op2.READ, map_from_fine_node_to_coarse_coordinate_nodes[op2.i[0]]))
 
     
 @firedrake.utils.known_pyop2_safe
