@@ -1,8 +1,7 @@
-
 import numpy as np
 from fractions import Fraction
 
-from firedrake import functionspace
+from pyop2.datatypes import IntType
 from firedrake import mesh
 from . import impl
 from .utils import set_level
@@ -26,8 +25,8 @@ class MeshHierarchy(object):
         """
         from firedrake_citations import Citations
         Citations().register("Mitchell2016")
-        if m.ufl_cell().cellname() not in ["triangle", "interval"]:
-            raise NotImplementedError("Only supported on intervals and triangles")
+        # if m.ufl_cell().cellname() not in ["triangle", "interval"]:
+        #     raise NotImplementedError("Only supported on intervals and triangles")
         if refinements_per_level < 1:
             raise ValueError("Must provide positive number of refinements per level")
         m._plex.setRefinementUniform(True)
@@ -78,18 +77,21 @@ class MeshHierarchy(object):
             m.init()
             m._overlapped_lgmap = impl.create_lgmap(m._plex)
 
-        # On coarse mesh n, a map of consistent cell orientations and
-        # vertex permutations for the fine cells on each coarse cell.
-        self._cells_vperm = []
-
+        self._coarse_to_fine = []
         for mc, mf, fpointis in zip(hierarchy[:-1],
                                     hierarchy[1:],
                                     fpoint_ises):
             mc._fpointIS = fpointis
-            c2f = impl.coarse_to_fine_cells(mc, mf)
-            P1c = functionspace.FunctionSpace(mc, 'CG', 1)
-            P1f = functionspace.FunctionSpace(mf, 'CG', 1)
-            self._cells_vperm.append(impl.compute_orientations(P1c, P1f, c2f))
+            self._coarse_to_fine.append(impl.coarse_to_fine_cells(mc, mf))
+
+        fine_to_coarse = [None]
+        for l, c2f in enumerate(self._coarse_to_fine):
+            f2c = np.zeros(hierarchy[l+1].cell_set.total_size, dtype=IntType)
+            tmp = np.zeros(c2f.T.shape, dtype=IntType)
+            tmp[:, ] = np.arange(hierarchy[l].cell_set.total_size, dtype=IntType)
+            f2c[c2f] = tmp.T
+            fine_to_coarse.append(f2c)
+        self._fine_to_coarse = fine_to_coarse
 
         self._hierarchy = tuple(hierarchy[::refinements_per_level])
         self._unskipped_hierarchy = tuple(hierarchy)
@@ -129,6 +131,7 @@ class ExtrudedMeshHierarchy(MeshHierarchy):
 
         See :func:`~.ExtrudedMesh` for the meaning of the remaining parameters.
         """
+        raise NotImplementedError("Sorry, new multigrid transfers not yet working for extruded")
         self.comm = mesh_hierarchy.comm
         self._base_hierarchy = mesh_hierarchy
         hierarchy = [mesh.ExtrudedMesh(m, layers, kernel=kernel,
@@ -138,7 +141,8 @@ class ExtrudedMeshHierarchy(MeshHierarchy):
                      for m in mesh_hierarchy._unskipped_hierarchy]
         self._unskipped_hierarchy = tuple(hierarchy)
         self._hierarchy = tuple(hierarchy[::mesh_hierarchy.refinements_per_level])
-        self._cells_vperm = self._base_hierarchy._cells_vperm
+        self._coarse_to_fine = self._base_hierarchy._coarse_to_fine
+        self._fine_to_coarse = self._base_hierarchy._fine_to_coarse
         for level, m in enumerate(self):
             set_level(m, self, level)
         # Attach fractional levels to skipped parts

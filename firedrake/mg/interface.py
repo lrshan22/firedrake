@@ -22,6 +22,11 @@ from tsfc import ufl_utils
 from tsfc.parameters import default_parameters
 
 
+__all__ = ["prolong", "restrict", "inject", "FunctionHierarchy",
+           "FunctionSpaceHierarchy", "VectorFunctionSpaceHierarchy",
+           "TensorFunctionSpaceHierarchy", "MixedFunctionSpaceHierarchy"]
+
+
 def to_reference_coordinates(ufl_coordinate_element, parameters=None):
     if parameters is None:
         parameters = tsfc.default_parameters()
@@ -147,7 +152,7 @@ static inline void to_reference_coords_kernel(double *X, const double *x0, const
     return evaluate_template_c % code
 
 
-def compile_element(expression, parameters=None):
+def compile_element(expression, dual_space=None, parameters=None):
     """Generates C code for point evaluations.
     :arg expression: UFL expression
     :arg coordinates: coordinate field
@@ -220,6 +225,7 @@ def compile_element(expression, parameters=None):
 
     # Translate UFL -> GEM
     if coefficient:
+        assert dual_space is None
         f_arg = [builder._coefficient(arg, "f")]
     else:
         f_arg = []
@@ -227,6 +233,7 @@ def compile_element(expression, parameters=None):
     result, = map_expr_dags(translator, [expression])
 
     tensor_indices = ()
+    b_arg = []
     if coefficient:
         if expression.ufl_shape:
             tensor_indices = tuple(gem.Index() for s in expression.ufl_shape)
@@ -236,8 +243,20 @@ def compile_element(expression, parameters=None):
         else:
             return_variable = gem.Indexed(gem.Variable('R', (1,)), (0,))
             result_arg = ast.Decl(SCALAR_TYPE, ast.Symbol('R', rank=(1,)))
+
     else:
         return_variable = gem.Indexed(gem.Variable('R', finat_elem.index_shape), argument_multiindex)
+        if dual_space:
+            elem = create_element(dual_space.ufl_element())
+            if elem.value_shape:
+                var = gem.Indexed(gem.Variable("b", elem.value_shape),
+                                  elem.get_value_indices())
+                b_arg = [ast.Decl(SCALAR_TYPE, ast.Symbol("b", rank=elem.value_shape))]
+            else:
+                var = gem.Indexed(gem.Variable("b", (1, )), (0, ))
+                b_arg = [ast.Decl(SCALAR_TYPE, ast.Symbol("b", rank=(1, )))]
+            result = gem.Product(result, var)
+
         result_arg = ast.Decl(SCALAR_TYPE, ast.Symbol('R', rank=finat_elem.index_shape))
 
     # Unroll
@@ -253,14 +272,12 @@ def compile_element(expression, parameters=None):
     body = generate_coffee(impero_c, {}, parameters["precision"])
 
     # Build kernel tuple
-    kernel_code = builder.construct_kernel("evaluate_kernel", [result_arg] + f_arg + [point_arg], body)
+    kernel_code = builder.construct_kernel("evaluate_kernel", [result_arg] + b_arg + f_arg + [point_arg], body)
 
     return kernel_code
 
 
 def prolong_kernel(expression):
-    from firedrake import TestFunction
-    V = expression.function_space()
     coordinates = expression.ufl_domain().coordinates
 
     mesh = coordinates.ufl_domain()
@@ -277,12 +294,9 @@ def prolong_kernel(expression):
     #include <stdio.h>
     void kernel(%(args)s, const double *X, const double *Xc)
     {
-        printf("Xphys: %%g %%g ", X[0], X[1]);
         double Xref[%(tdim)d];
         to_reference_coords_kernel(Xref, X, Xc);
-        printf("Xref: %%g %%g\\n", Xref[0], Xref[1]);
         evaluate_kernel(%(arg_names)s, Xref);
-        printf("f: %%g %%g %%g R: %%g\\n", f[0], f[1], f[2], R[0]);
     }
     """ % {"to_reference": str(to_reference_kernel),
            "evaluate": str(evaluate_kernel),
@@ -291,11 +305,6 @@ def prolong_kernel(expression):
            "tdim": mesh.topological_dimension()}
 
     return op2.Kernel(my_kernel, name="kernel")
-
-
-__all__ = ["prolong", "restrict", "inject", "FunctionHierarchy",
-           "FunctionSpaceHierarchy", "VectorFunctionSpaceHierarchy",
-           "TensorFunctionSpaceHierarchy", "MixedFunctionSpaceHierarchy"]
 
 
 def check_arguments(coarse, fine):
@@ -311,49 +320,110 @@ def check_arguments(coarse, fine):
         raise ValueError("Can't transfer between functions from different hierarchies")
 
 
+def fine_node_to_coarse_node_map(Vf, Vc):
+    # XXX: For extruded, we need to build a full map, rather than one
+    # on the base mesh with offsets
+    meshc = Vc.ufl_domain()
+    meshf = Vf.ufl_domain()
+
+    hierarchy, level = utils.get_level(meshc)
+    _, flevel = utils.get_level(meshf)
+
+    assert level + 1 == flevel
+    fine_to_coarse = hierarchy._fine_to_coarse[level+1]
+    fine_map = Vf.cell_node_map()
+    coarse_map = Vc.cell_node_map()
+
+    fine_to_coarse_nodes = numpy.zeros((fine_map.toset.total_size,
+                                        coarse_map.arity),
+                                       dtype=IntType)
+    for fcell, nodes in enumerate(fine_map.values_with_halo):
+        ccell = fine_to_coarse[fcell]
+        fine_to_coarse_nodes[nodes, :] = coarse_map.values_with_halo[ccell, :]
+
+    return op2.Map(Vf.node_set, Vc.node_set, coarse_map.arity,
+                   values=fine_to_coarse_nodes)
+
 
 def prolong(input, output):
     import firedrake
-    coarse_V = input.function_space()
-    fine_V = output.function_space()
-    c2f_map = utils.coarse_to_fine_node_map(coarse_V, fine_V).values_with_halo
+    Vc = input.function_space()
+    Vf = output.function_space()
 
-    coarse_coordinates = coarse_V.ufl_domain().coordinates
-    d = {}
-    coarse_map = coarse_V.cell_node_map().values_with_halo
-    coords_map = coarse_coordinates.cell_node_map().values_with_halo
-    dc = {}
-    for cell, nodes in enumerate(c2f_map):
-        for node in nodes:
-            if node in d:
-                continue
-            d[node] = coarse_map[cell, :]
-            dc[node] = coords_map[cell, :]
-
-    map_from_fine_node_to_coarse_nodes = numpy.asarray([d[k] for k in sorted(d.keys())])
-
-    map_from_fine_node_to_coarse_nodes = op2.Map(output.node_set, input.node_set, map_from_fine_node_to_coarse_nodes.shape[1],
-                                                 values=map_from_fine_node_to_coarse_nodes)
-
-    map_from_fine_node_to_coarse_coordinate_nodes = numpy.asarray([dc[k] for k in sorted(dc.keys())])
-    map_from_fine_node_to_coarse_coordinate_nodes = op2.Map(output.node_set, coarse_coordinates.node_set, map_from_fine_node_to_coarse_coordinate_nodes.shape[1],
-                                                            values=map_from_fine_node_to_coarse_coordinate_nodes)
-
+    coarse_coords = Vc.ufl_domain().coordinates
+    fine_to_coarse = fine_node_to_coarse_node_map(Vf, Vc)
+    fine_to_coarse_coords = fine_node_to_coarse_node_map(Vf, coarse_coords.function_space())
     kernel = prolong_kernel(input)
+
     output.dat.zero()
     # XXX: Should be able to figure out locations by pushing forward
     # reference cell node locations to physical space.
-    Vf = firedrake.FunctionSpace(fine_V.ufl_domain(), firedrake.VectorElement(fine_V.ufl_element()))
-    input_node_physical_location = firedrake.interpolate(firedrake.SpatialCoordinate(fine_V.ufl_domain()), Vf)
+    # x = \sum_i c_i \phi_i(x_hat)
+    Vfc = firedrake.FunctionSpace(Vf.ufl_domain(), firedrake.VectorElement(Vf.ufl_element()))
+    input_node_physical_location = firedrake.interpolate(firedrake.SpatialCoordinate(Vf.ufl_domain()), Vfc)
     op2.par_loop(kernel, output.node_set,
                  output.dat(op2.WRITE),
-                 input.dat(op2.READ, map_from_fine_node_to_coarse_nodes[op2.i[0]]),
+                 input.dat(op2.READ, fine_to_coarse[op2.i[0]]),
                  input_node_physical_location.dat(op2.READ),
-                 coarse_coordinates.dat(op2.READ, map_from_fine_node_to_coarse_coordinate_nodes[op2.i[0]]))
+                 coarse_coords.dat(op2.READ, fine_to_coarse_coords[op2.i[0]]))
 
-    
+
+def restrict_kernel(Vf, Vc):
+    from firedrake import TestFunction
+    coordinates = Vc.ufl_domain().coordinates
+
+    mesh = coordinates.ufl_domain()
+    evaluate_kernel = compile_element(TestFunction(Vc), Vf)
+    to_reference_kernel = to_reference_coordinates(coordinates.ufl_element())
+
+    eval_args = evaluate_kernel.args[:-1]
+
+    args = ", ".join(a.gencode(not_scope=True) for a in eval_args)
+    arg_names = ", ".join(a.sym.symbol for a in eval_args)
+    my_kernel = """
+    %(to_reference)s
+    %(evaluate)s
+    #include <stdio.h>
+    void kernel(%(args)s, const double *X, const double *Xc)
+    {
+        double Xref[%(tdim)d];
+        to_reference_coords_kernel(Xref, X, Xc);
+        evaluate_kernel(%(arg_names)s, Xref);
+    }
+    """ % {"to_reference": str(to_reference_kernel),
+           "evaluate": str(evaluate_kernel),
+           "args": args,
+           "arg_names": arg_names,
+           "tdim": mesh.topological_dimension()}
+
+    return op2.Kernel(my_kernel, name="kernel")
+
+
+def restrict(input, output):
+    import firedrake
+    Vf = input.function_space()
+    Vc = output.function_space()
+    output.dat.zero()
+    # XXX: Should be able to figure out locations by pushing forward
+    # reference cell node locations to physical space.
+    # x = \sum_i c_i \phi_i(x_hat)
+    Vfc = firedrake.FunctionSpace(Vf.ufl_domain(), firedrake.VectorElement(Vf.ufl_element()))
+    input_node_physical_location = firedrake.interpolate(firedrake.SpatialCoordinate(Vf.ufl_domain()), Vfc)
+
+    coarse_coords = Vc.ufl_domain().coordinates
+    fine_to_coarse = fine_node_to_coarse_node_map(Vf, Vc)
+    fine_to_coarse_coords = fine_node_to_coarse_node_map(Vf, coarse_coords.function_space())
+    kernel = restrict_kernel(Vf, Vc)
+    op2.par_loop(kernel, input.node_set,
+                 output.dat(op2.INC, fine_to_coarse[op2.i[0]]),
+                 input.dat(op2.READ),
+                 input_node_physical_location.dat(op2.READ),
+                 coarse_coords.dat(op2.READ, fine_to_coarse_coords[op2.i[0]]))
+
+
 @firedrake.utils.known_pyop2_safe
 def transfer(input, output, typ=None):
+    raise NotImplementedError("Sorry, transfer type %s not implemented for new multigrid setup" % typ)
     if len(input.function_space()) > 1:
         if len(output.function_space()) != len(input.function_space()):
             raise ValueError("Mixed spaces have different lengths")
@@ -420,8 +490,6 @@ def transfer(input, output, typ=None):
         op2.par_loop(*args)
         input = next
 
-
-restrict = partial(transfer, typ="restrict")
 
 inject = partial(transfer, typ="inject")
 
