@@ -152,7 +152,8 @@ static inline void to_reference_coords_kernel(double *X, const double *x0, const
     return evaluate_template_c % code
 
 
-def compile_element(expression, dual_space=None, parameters=None):
+def compile_element(expression, dual_space=None, parameters=None,
+                    name="evaluate_kernel"):
     """Generates C code for point evaluations.
     :arg expression: UFL expression
     :arg coordinates: coordinate field
@@ -272,7 +273,7 @@ def compile_element(expression, dual_space=None, parameters=None):
     body = generate_coffee(impero_c, {}, parameters["precision"])
 
     # Build kernel tuple
-    kernel_code = builder.construct_kernel("evaluate_kernel", [result_arg] + b_arg + f_arg + [point_arg], body)
+    kernel_code = builder.construct_kernel(name, [result_arg] + b_arg + f_arg + [point_arg], body)
 
     return kernel_code
 
@@ -359,6 +360,8 @@ def prolong(input, output):
     # XXX: Should be able to figure out locations by pushing forward
     # reference cell node locations to physical space.
     # x = \sum_i c_i \phi_i(x_hat)
+    # Need to know, for each node, which node in reference space it is.
+    # hmmm.
     Vfc = firedrake.FunctionSpace(Vf.ufl_domain(), firedrake.VectorElement(Vf.ufl_element()))
     input_node_physical_location = firedrake.interpolate(firedrake.SpatialCoordinate(Vf.ufl_domain()), Vfc)
     op2.par_loop(kernel, output.node_set,
