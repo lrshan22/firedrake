@@ -1,35 +1,46 @@
+import numpy
 from pyop2 import op2
+from pyop2.datatypes import IntType
 from firedrake.functionspacedata import entity_dofs_key
 
 
-def coarse_to_fine_node_map(coarse, fine):
-    if len(coarse) > 1:
-        assert len(fine) == len(coarse)
-        return op2.MixedMap(coarse_to_fine_node_map(c, f) for c, f in zip(coarse, fine))
-    mesh = coarse.mesh()
+def fine_node_to_coarse_node_map(Vf, Vc):
+    if len(Vf) > 1:
+        assert len(Vf) == len(Vc)
+        return op2.MixedMap(fine_node_to_coarse_node_map(f, c) for f, c in zip(Vf, Vc))
+    mesh = Vf.mesh()
     assert hasattr(mesh, "_shared_data_cache")
-    if not (coarse.ufl_element() == fine.ufl_element()):
-        raise ValueError("Can't transfer between different spaces")
-    ch, level = get_level(mesh)
-    fh, fine_level = get_level(fine.mesh())
-    if ch is not fh:
-        raise ValueError("Can't map between different hierarchies")
-    refinements_per_level = ch.refinements_per_level
-    if refinements_per_level*level + 1 != refinements_per_level*fine_level:
-        raise ValueError("Can't map between level %s and level %s" % (level, fine_level))
-    c2f, vperm = ch._cells_vperm[int(level*refinements_per_level)]
+    hierarchyf, levelf = get_level(Vf.ufl_domain())
+    hierarchyc, levelc = get_level(Vc.ufl_domain())
 
-    key = entity_dofs_key(coarse.finat_element.entity_dofs()) + (level, )
+    if hierarchyc != hierarchyf:
+        raise ValueError("Can't map across hierarchies")
+
+    hierarchy = hierarchyf
+    if levelc + 1 != levelf:
+        raise ValueError("Can't map between level %s and level %s" % (levelc, levelf))
+
+    key = (entity_dofs_key(Vc.finat_element.entity_dofs()) +
+           entity_dofs_key(Vf.finat_element.entity_dofs()) +
+           (levelc, levelf))
+
     cache = mesh._shared_data_cache["hierarchy_cell_node_map"]
     try:
         return cache[key]
     except KeyError:
-        from .impl import create_cell_node_map
-        map_vals, offset = create_cell_node_map(coarse, fine, c2f, vperm)
-        return cache.setdefault(key, op2.Map(mesh.cell_set,
-                                             fine.node_set,
-                                             map_vals.shape[1],
-                                             map_vals, offset=offset))
+        # XXX: Rewrite in cython.
+        fine_to_coarse = hierarchy._fine_to_coarse[levelc+1]
+        fine_map = Vf.cell_node_map()
+        coarse_map = Vc.cell_node_map()
+        fine_to_coarse_nodes = numpy.zeros((fine_map.toset.total_size,
+                                            coarse_map.arity),
+                                           dtype=IntType)
+        for fcell, nodes in enumerate(fine_map.values_with_halo):
+            ccell = fine_to_coarse[fcell]
+            fine_to_coarse_nodes[nodes, :] = coarse_map.values_with_halo[ccell, :]
+
+        return cache.setdefault(key, op2.Map(Vf.node_set, Vc.node_set, coarse_map.arity,
+                                             values=fine_to_coarse_nodes))
 
 
 def set_level(obj, hierarchy, level):
