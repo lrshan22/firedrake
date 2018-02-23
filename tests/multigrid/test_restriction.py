@@ -127,6 +127,7 @@ def run_extruded_restriction(mtype, vector, space, degree):
         assert np.allclose(expect.dat.data_ro, actual.dat.data_ro)
 
 
+@pytest.mark.xfail(reason="Extruded not yet implemented for new transfer scheme")
 @pytest.mark.parametrize(["mtype", "vector", "space", "degree"],
                          itertools.product(("interval", "square"),
                                            [False, True],
@@ -140,48 +141,56 @@ def test_extruded_restriction(mtype, vector, space, degree):
     run_extruded_restriction(mtype, vector, space, degree)
 
 
+@pytest.mark.xfail(reason="Extruded not yet implemented for new transfer scheme")
 @pytest.mark.parallel(nprocs=2)
 def test_extruded_dg_restriction_square_parallel():
     for d in range(0, 3):
         run_extruded_restriction("square", False, "DG", d)
 
 
+@pytest.mark.xfail(reason="Extruded not yet implemented for new transfer scheme")
 @pytest.mark.parallel(nprocs=2)
 def test_extruded_vector_dg_restriction_square_parallel():
     for d in range(0, 3):
         run_extruded_restriction("square", True, "DG", d)
 
 
+@pytest.mark.xfail(reason="Extruded not yet implemented for new transfer scheme")
 @pytest.mark.parallel(nprocs=2)
 def test_extruded_cg_restriction_square_parallel():
     for d in range(1, 4):
         run_extruded_restriction("square", False, "CG", d)
 
 
+@pytest.mark.xfail(reason="Extruded not yet implemented for new transfer scheme")
 @pytest.mark.parallel(nprocs=2)
 def test_extruded_vector_cg_restriction_square_parallel():
     for d in range(1, 4):
         run_extruded_restriction("square", True, "CG", d)
 
 
+@pytest.mark.xfail(reason="Extruded not yet implemented for new transfer scheme")
 @pytest.mark.parallel(nprocs=2)
 def test_extruded_dg_restriction_interval_parallel():
     for d in range(0, 3):
         run_extruded_restriction("interval", False, "DG", d)
 
 
+@pytest.mark.xfail(reason="Extruded not yet implemented for new transfer scheme")
 @pytest.mark.parallel(nprocs=2)
 def test_extruded_vector_dg_restriction_interval_parallel():
     for d in range(0, 3):
         run_extruded_restriction("interval", True, "DG", d)
 
 
+@pytest.mark.xfail(reason="Extruded not yet implemented for new transfer scheme")
 @pytest.mark.parallel(nprocs=2)
 def test_extruded_cg_restriction_interval_parallel():
     for d in range(1, 4):
         run_extruded_restriction("interval", False, "CG", d)
 
 
+@pytest.mark.xfail(reason="Extruded not yet implemented for new transfer scheme")
 @pytest.mark.parallel(nprocs=2)
 def test_extruded_vector_cg_restriction_interval_parallel():
     for d in range(1, 4):
