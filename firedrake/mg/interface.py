@@ -41,18 +41,14 @@ def prolong(input, output):
     fine_to_coarse_coords = utils.fine_node_to_coarse_node_map(Vf, coarse_coords.function_space())
     kernel = kernels.prolong_kernel(input)
 
-    output.dat.zero()
     # XXX: Should be able to figure out locations by pushing forward
     # reference cell node locations to physical space.
     # x = \sum_i c_i \phi_i(x_hat)
-    # Need to know, for each node, which node in reference space it is.
-    # hmmm.
-    Vfc = firedrake.FunctionSpace(Vf.ufl_domain(), firedrake.VectorElement(Vf.ufl_element()))
-    input_node_physical_location = firedrake.interpolate(firedrake.SpatialCoordinate(Vf.ufl_domain()), Vfc)
+    node_locations = utils.physical_node_locations(Vf)
     op2.par_loop(kernel, output.node_set,
                  output.dat(op2.WRITE),
                  input.dat(op2.READ, fine_to_coarse[op2.i[0]]),
-                 input_node_physical_location.dat(op2.READ),
+                 node_locations.dat(op2.READ),
                  coarse_coords.dat(op2.READ, fine_to_coarse_coords[op2.i[0]]))
 
 
@@ -69,8 +65,7 @@ def restrict(input, output):
     # XXX: Should be able to figure out locations by pushing forward
     # reference cell node locations to physical space.
     # x = \sum_i c_i \phi_i(x_hat)
-    Vfc = firedrake.FunctionSpace(Vf.ufl_domain(), firedrake.VectorElement(Vf.ufl_element()))
-    input_node_physical_location = firedrake.interpolate(firedrake.SpatialCoordinate(Vf.ufl_domain()), Vfc)
+    node_locations = utils.physical_node_locations(Vf)
 
     coarse_coords = Vc.ufl_domain().coordinates
     fine_to_coarse = utils.fine_node_to_coarse_node_map(Vf, Vc)
@@ -79,7 +74,7 @@ def restrict(input, output):
     op2.par_loop(kernel, input.node_set,
                  output.dat(op2.INC, fine_to_coarse[op2.i[0]]),
                  input.dat(op2.READ),
-                 input_node_physical_location.dat(op2.READ),
+                 node_locations.dat(op2.READ),
                  coarse_coords.dat(op2.READ, fine_to_coarse_coords[op2.i[0]]))
 
 

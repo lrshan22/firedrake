@@ -2,6 +2,8 @@ import numpy
 from pyop2 import op2
 from pyop2.datatypes import IntType
 from firedrake.functionspacedata import entity_dofs_key
+import ufl
+import firedrake
 
 
 def fine_node_to_coarse_node_map(Vf, Vc):
@@ -24,7 +26,7 @@ def fine_node_to_coarse_node_map(Vf, Vc):
            entity_dofs_key(Vf.finat_element.entity_dofs()) +
            (levelc, levelf))
 
-    cache = mesh._shared_data_cache["hierarchy_cell_node_map"]
+    cache = mesh._shared_data_cache["hierarchy_fine_node_to_coarse_node_map"]
     try:
         return cache[key]
     except KeyError:
@@ -41,6 +43,36 @@ def fine_node_to_coarse_node_map(Vf, Vc):
 
         return cache.setdefault(key, op2.Map(Vf.node_set, Vc.node_set, coarse_map.arity,
                                              values=fine_to_coarse_nodes))
+
+
+def physical_node_locations(V):
+    element = V.ufl_element()
+    if element.value_shape():
+        assert isinstance(element, (ufl.VectorElement, ufl.TensorElement))
+        element = element.sub_elements()[0]
+    mesh = V.mesh()
+    cache = mesh._shared_data_cache["hierarchy_physical_node_locations"]
+    key = element
+    try:
+        return cache[key]
+    except KeyError:
+        Vc = firedrake.FunctionSpace(mesh, ufl.VectorElement(element))
+        locations = firedrake.interpolate(firedrake.SpatialCoordinate(mesh), Vc)
+        return cache.setdefault(key, locations)
+
+
+# def fine_node_to_reference_basis(V):
+#     # XXX: procedure for computing physical space node locations of
+#     # fine basis functions:
+#     # 1. Determine reference element location for each node: hit
+#     #    fiat/finat <- Not done now.
+#     # 2. Evaluate *fine* coordinate field at this location.
+#     # 3. Now we have physical location X_f
+#     # 4. Now map to reference space on coarse cell.
+#     if len(V) > 1:
+#         # XXX: cache this
+#         return op2.MixedDat(fine_node_to_reference_basis(V_) for V_ in V)
+#     mesh = V.mesh()
 
 
 def set_level(obj, hierarchy, level):
