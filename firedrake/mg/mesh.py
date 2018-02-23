@@ -80,9 +80,9 @@ class MeshHierarchy(object):
 
         fine_to_coarse = [None]
         for l, c2f in enumerate(self._coarse_to_fine):
-            f2c = np.zeros(hierarchy[l+1].cell_set.total_size, dtype=IntType)
+            f2c = np.zeros(hierarchy[l+1].cell_set.size, dtype=IntType)
             tmp = np.zeros(c2f.T.shape, dtype=IntType)
-            tmp[:, ] = np.arange(hierarchy[l].cell_set.total_size, dtype=IntType)
+            tmp[:, ] = np.arange(hierarchy[l].cell_set.size, dtype=IntType)
             f2c[c2f] = tmp.T
             fine_to_coarse.append(f2c)
         self._fine_to_coarse = fine_to_coarse
