@@ -34,12 +34,13 @@ def fine_node_to_coarse_node_map(Vf, Vc):
         fine_to_coarse = hierarchy._fine_to_coarse[levelc+1]
         fine_map = Vf.cell_node_map()
         coarse_map = Vc.cell_node_map()
-        fine_to_coarse_nodes = numpy.zeros((fine_map.toset.total_size,
-                                            coarse_map.arity),
-                                           dtype=IntType)
-        for fcell, nodes in enumerate(fine_map.values_with_halo):
+        fine_to_coarse_nodes = numpy.full((fine_map.toset.total_size,
+                                           coarse_map.arity),
+                                          -1,
+                                          dtype=IntType)
+        for fcell, nodes in enumerate(fine_map.values):
             ccell = fine_to_coarse[fcell]
-            fine_to_coarse_nodes[nodes, :] = coarse_map.values_with_halo[ccell, :]
+            fine_to_coarse_nodes[nodes, :] = coarse_map.values[ccell, :]
 
         return cache.setdefault(key, op2.Map(Vf.node_set, Vc.node_set, coarse_map.arity,
                                              values=fine_to_coarse_nodes))
@@ -76,12 +77,13 @@ def coarse_node_to_fine_node_map(Vc, Vf):
 
         _, fcell_per_ccell = coarse_to_fine.shape
 
-        coarse_to_fine_nodes = numpy.zeros((coarse_map.toset.total_size,
-                                            fine_map.arity * fcell_per_ccell),
-                                           dtype=IntType)
-        for ccell, nodes in enumerate(coarse_map.values_with_halo):
+        coarse_to_fine_nodes = numpy.full((coarse_map.toset.total_size,
+                                           fine_map.arity * fcell_per_ccell),
+                                          -1,
+                                          dtype=IntType)
+        for ccell, nodes in enumerate(coarse_map.values):
             fcells = coarse_to_fine[ccell]
-            coarse_to_fine_nodes[nodes, :] = fine_map.values_with_halo[fcells, :].reshape(-1)
+            coarse_to_fine_nodes[nodes, :] = fine_map.values[fcells, :].reshape(-1)
 
         return cache.setdefault(key, op2.Map(Vc.node_set, Vf.node_set,
                                              fine_map.arity * fcell_per_ccell,

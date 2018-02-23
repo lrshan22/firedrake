@@ -18,7 +18,7 @@ def check_arguments(coarse, fine):
         raise ValueError("Coarse function must be from coarser space")
     if hierarchy is not fhierarchy:
         raise ValueError("Can't transfer between functions from different hierarchies")
-    if coarse.ufl_shape() != fine.ufl_shape():
+    if coarse.ufl_shape != fine.ufl_shape:
         raise ValueError("Mismatching function space shapes")
 
 
@@ -42,9 +42,14 @@ def prolong(coarse, fine):
     # reference cell node locations to physical space.
     # x = \sum_i c_i \phi_i(x_hat)
     node_locations = utils.physical_node_locations(Vf)
-    op2.par_loop(kernel, coarse.node_set,
-                 coarse.dat(op2.WRITE),
-                 fine.dat(op2.READ, fine_to_coarse[op2.i[0]]),
+    # Have to do this, because the node set core size is not right for
+    # this expanded stencil
+    for d in [coarse, coarse_coords]:
+        d.dat.global_to_local_begin(op2.READ)
+        d.dat.global_to_local_end(op2.READ)
+    op2.par_loop(kernel, fine.node_set,
+                 fine.dat(op2.WRITE),
+                 coarse.dat(op2.READ, fine_to_coarse[op2.i[0]]),
                  node_locations.dat(op2.READ),
                  coarse_coords.dat(op2.READ, fine_to_coarse_coords[op2.i[0]]))
 
@@ -68,6 +73,11 @@ def restrict(fine_dual, coarse_dual):
     coarse_coords = Vc.ufl_domain().coordinates
     fine_to_coarse = utils.fine_node_to_coarse_node_map(Vf, Vc)
     fine_to_coarse_coords = utils.fine_node_to_coarse_node_map(Vf, coarse_coords.function_space())
+    # Have to do this, because the node set core size is not right for
+    # this expanded stencil
+    for d in [coarse_coords]:
+        d.dat.global_to_local_begin(op2.READ)
+        d.dat.global_to_local_end(op2.READ)
     kernel = kernels.restrict_kernel(Vf, Vc)
     op2.par_loop(kernel, fine_dual.node_set,
                  coarse_dual.dat(op2.INC, fine_to_coarse[op2.i[0]]),
@@ -104,8 +114,13 @@ def inject(fine, coarse):
     coarse_node_to_fine_coords = utils.coarse_node_to_fine_node_map(Vc, fine_coords.function_space())
 
     kernel = kernels.inject_kernel(Vc, Vf)
+    # Have to do this, because the node set core size is not right for
+    # this expanded stencil
+    for d in [fine, fine_coords]:
+        d.dat.global_to_local_begin(op2.READ)
+        d.dat.global_to_local_end(op2.READ)
     op2.par_loop(kernel, coarse.node_set,
-                 coarse.dat(op2.WRITE),
+                 coarse.dat(op2.INC),
                  node_locations.dat(op2.READ),
                  fine.dat(op2.READ, coarse_node_to_fine_nodes[op2.i[0]]),
                  fine_coords.dat(op2.READ, coarse_node_to_fine_coords[op2.i[0]]))

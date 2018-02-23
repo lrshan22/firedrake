@@ -174,31 +174,25 @@ def compile_element(expression, dual_space=None, parameters=None,
         arg, = extract_coefficients(expression)
         argument_multiindices = ()
         coefficient = True
+        if expression.ufl_shape:
+            tensor_indices = tuple(gem.Index() for s in expression.ufl_shape)
+        else:
+            tensor_indices = ()
     except ValueError:
         arg, = extract_arguments(expression)
         finat_elem = create_element(arg.ufl_element())
         argument_multiindices = (finat_elem.get_indices(), )
         argument_multiindex, = argument_multiindices
+        value_shape = finat_elem.value_shape
+        if value_shape:
+            tensor_indices = argument_multiindex[-len(value_shape):]
+        else:
+            tensor_indices = ()
         coefficient = False
-
-    # # Point evaluation of mixed coefficients not supported here
-    # if type(coefficient.ufl_element()) == MixedElement:
-    #     raise NotImplementedError("Cannot point evaluate mixed elements yet!")
 
     # Replace coordinates (if any)
     builder = firedrake_interface.KernelBuilderBase()
     domain = expression.ufl_domain()
-    # # Replace coordinates (if any)
-    # domain = expression.ufl_domain()
-    # assert coordinates.ufl_domain() == domain
-    # expression = tsfc.ufl_utils.replace_coordinates(expression, coordinates)
-
-    # Initialise kernel builder
-    # f_arg = builder._coefficient(coefficient, "f")
-
-    # TODO: restore this for expression evaluation!
-    # expression = ufl_utils.split_coefficients(expression, builder.coefficient_split)
-
     # Translate to GEM
     cell = domain.ufl_cell()
     dim = cell.topological_dimension()
@@ -211,7 +205,6 @@ def compile_element(expression, dual_space=None, parameters=None,
                   point_indices=(),
                   point_expr=point,
                   argument_multiindices=argument_multiindices)
-    # TODO: restore this for expression evaluation!
     context = tsfc.fem.GemPointContext(**config)
 
     # Abs-simplification
@@ -226,11 +219,9 @@ def compile_element(expression, dual_space=None, parameters=None,
     translator = tsfc.fem.Translator(context)
     result, = map_expr_dags(translator, [expression])
 
-    tensor_indices = ()
     b_arg = []
     if coefficient:
         if expression.ufl_shape:
-            tensor_indices = tuple(gem.Index() for s in expression.ufl_shape)
             return_variable = gem.Indexed(gem.Variable('R', expression.ufl_shape), tensor_indices)
             result_arg = ast.Decl(SCALAR_TYPE, ast.Symbol('R', rank=expression.ufl_shape))
             result = gem.Indexed(result, tensor_indices)
@@ -240,11 +231,12 @@ def compile_element(expression, dual_space=None, parameters=None,
 
     else:
         return_variable = gem.Indexed(gem.Variable('R', finat_elem.index_shape), argument_multiindex)
+        result = gem.Indexed(result, tensor_indices)
         if dual_space:
             elem = create_element(dual_space.ufl_element())
             if elem.value_shape:
                 var = gem.Indexed(gem.Variable("b", elem.value_shape),
-                                  elem.get_value_indices())
+                                  tensor_indices)
                 b_arg = [ast.Decl(SCALAR_TYPE, ast.Symbol("b", rank=elem.value_shape))]
             else:
                 var = gem.Indexed(gem.Variable("b", (1, )), (0, ))
