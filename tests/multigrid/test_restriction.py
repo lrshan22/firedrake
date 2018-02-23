@@ -4,16 +4,13 @@ import numpy as np
 import itertools
 
 
-def run_restriction(mtype, vector, space, degree, ref_per_level=1):
+def run_restriction(mtype, vector, space, degree):
     if mtype == "interval":
         m = UnitIntervalMesh(10)
     elif mtype == "square":
         m = UnitSquareMesh(4, 4)
-    if ref_per_level > 2:
-        nref = 1
-    else:
-        nref = 2
-    mh = MeshHierarchy(m, nref, refinements_per_level=ref_per_level)
+    nref = 2
+    mh = MeshHierarchy(m, nref)
 
     mesh = mh[-1]
     if vector:
@@ -43,13 +40,12 @@ def run_restriction(mtype, vector, space, degree, ref_per_level=1):
                                            range(0, 4),
                                            [False, True],
                                            ["CG", "DG"]))
-@pytest.mark.parametrize("ref_per_level", [1, 2, 3])
-def test_restriction(mtype, degree, vector, fs, ref_per_level):
+def test_restriction(mtype, degree, vector, fs):
     if fs == "CG" and degree == 0:
         pytest.skip("CG0 makes no sense")
     if fs == "DG" and degree == 3:
         pytest.skip("DG3 too expensive")
-    run_restriction(mtype, vector, fs, degree, ref_per_level)
+    run_restriction(mtype, vector, fs, degree)
 
 
 @pytest.mark.parallel(nprocs=2)
@@ -100,12 +96,12 @@ def test_vector_dg_restriction_interval_parallel():
         run_restriction("interval", True, "DG", degree)
 
 
-def run_extruded_restriction(mtype, vector, space, degree, ref_per_level=1):
+def run_extruded_restriction(mtype, vector, space, degree):
     if mtype == "interval":
         m = UnitIntervalMesh(10)
     elif mtype == "square":
         m = UnitSquareMesh(4, 4)
-    mh = MeshHierarchy(m, 2, refinements_per_level=ref_per_level)
+    mh = MeshHierarchy(m, 2)
 
     emh = ExtrudedMeshHierarchy(mh, layers=3)
     mesh = emh[-1]
@@ -136,13 +132,12 @@ def run_extruded_restriction(mtype, vector, space, degree, ref_per_level=1):
                                            [False, True],
                                            ["CG", "DG"],
                                            range(0, 4)))
-@pytest.mark.parametrize("ref_per_level", [1, 2])
-def test_extruded_restriction(mtype, vector, space, degree, ref_per_level):
+def test_extruded_restriction(mtype, vector, space, degree):
     if space == "CG" and degree == 0:
         pytest.skip("CG0 makes no sense")
     if space == "DG" and degree == 3:
         pytest.skip("DG3 too expensive")
-    run_extruded_restriction(mtype, vector, space, degree, ref_per_level)
+    run_extruded_restriction(mtype, vector, space, degree)
 
 
 @pytest.mark.parallel(nprocs=2)

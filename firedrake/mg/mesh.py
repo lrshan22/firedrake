@@ -11,15 +11,11 @@ __all__ = ["MeshHierarchy", "ExtrudedMeshHierarchy"]
 
 
 class MeshHierarchy(object):
-    def __init__(self, m, refinement_levels, refinements_per_level=1, reorder=None):
+    def __init__(self, m, refinement_levels, reorder=None):
         """Build a hierarchy of meshes by uniformly refining a coarse mesh.
 
         :arg m: the coarse :func:`~.Mesh` to refine
         :arg refinement_levels: the number of levels of refinement
-        :arg refinements_per_level: Optional number of refinements per
-            level in the resulting hierarchy.  Note that the
-            intermediate meshes are still kept, but iteration over the
-            mesh hierarchy skips them.
         :arg reorder: optional flag indicating whether to reorder the
              refined meshes.
         """
@@ -27,8 +23,6 @@ class MeshHierarchy(object):
         Citations().register("Mitchell2016")
         # if m.ufl_cell().cellname() not in ["triangle", "interval"]:
         #     raise NotImplementedError("Only supported on intervals and triangles")
-        if refinements_per_level < 1:
-            raise ValueError("Must provide positive number of refinements per level")
         m._plex.setRefinementUniform(True)
         dm_hierarchy = []
 
@@ -37,7 +31,7 @@ class MeshHierarchy(object):
         fpoint_ises = []
         if m.comm.size > 1 and m._grown_halos:
             raise RuntimeError("Cannot refine parallel overlapped meshes (make sure the MeshHierarchy is built immediately after the Mesh)")
-        for i in range(refinement_levels*refinements_per_level):
+        for i in range(refinement_levels):
             rdm = cdm.refine()
             fpoint_ises.append(cdm.createCoarsePointIS())
             # Remove interior facet label (re-construct from
@@ -93,18 +87,9 @@ class MeshHierarchy(object):
             fine_to_coarse.append(f2c)
         self._fine_to_coarse = fine_to_coarse
 
-        self._hierarchy = tuple(hierarchy[::refinements_per_level])
-        self._unskipped_hierarchy = tuple(hierarchy)
+        self._hierarchy = tuple(hierarchy)
         for level, m in enumerate(self):
             set_level(m, self, level)
-        # Attach fractional levels to skipped parts
-        # This allows us to do magic under the hood so that multigrid
-        # on skipping hierarchies still works!
-        for level, m in enumerate(hierarchy):
-            if level % refinements_per_level == 0:
-                continue
-            set_level(m, self, Fraction(level, refinements_per_level))
-        self.refinements_per_level = refinements_per_level
 
     def __iter__(self):
         """Iterate over the hierarchy of meshes from coarsest to finest"""
@@ -140,14 +125,8 @@ class ExtrudedMeshHierarchy(MeshHierarchy):
                                        gdim=gdim)
                      for m in mesh_hierarchy._unskipped_hierarchy]
         self._unskipped_hierarchy = tuple(hierarchy)
-        self._hierarchy = tuple(hierarchy[::mesh_hierarchy.refinements_per_level])
+        self._hierarchy = tuple(hierarchy)
         self._coarse_to_fine = self._base_hierarchy._coarse_to_fine
         self._fine_to_coarse = self._base_hierarchy._fine_to_coarse
         for level, m in enumerate(self):
             set_level(m, self, level)
-        # Attach fractional levels to skipped parts
-        for level, m in enumerate(hierarchy):
-            if level % mesh_hierarchy.refinements_per_level == 0:
-                continue
-            set_level(m, self, Fraction(level, mesh_hierarchy.refinements_per_level))
-        self.refinements_per_level = mesh_hierarchy.refinements_per_level
