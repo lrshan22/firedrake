@@ -3,6 +3,7 @@ from pyop2 import op2
 from pyop2.datatypes import IntType, as_cstr
 from firedrake.functionspacedata import entity_dofs_key
 import firedrake
+from firedrake.mg import utils
 
 from ufl.algorithms.analysis import extract_arguments, extract_coefficients
 from ufl.corealg.map_dag import map_expr_dags, map_expr_dag
@@ -11,10 +12,12 @@ import gem.impero_utils as impero_utils
 import coffee.base as ast
 import ufl
 import tsfc
+import sympy
 import tsfc.kernel_interface.firedrake as firedrake_interface
 from tsfc.coffee import SCALAR_TYPE, generate as generate_coffee
 from tsfc import ufl_utils
 from tsfc.parameters import default_parameters
+from tsfc.finatinterface import create_element
 
 
 def to_reference_coordinates(ufl_coordinate_element, parameters=None):
@@ -272,6 +275,7 @@ def prolong_kernel(expression):
     cache = expression.ufl_domain()._shared_data_cache["transfer_kernels"]
     coordinates = expression.ufl_domain().coordinates
     key = (("prolong", ) +
+           expression.ufl_element().value_shape() +
            entity_dofs_key(expression.function_space().finat_element.entity_dofs()) +
            entity_dofs_key(coordinates.function_space().finat_element.entity_dofs()))
     try:
@@ -280,7 +284,7 @@ def prolong_kernel(expression):
         mesh = coordinates.ufl_domain()
         evaluate_kernel = compile_element(expression)
         to_reference_kernel = to_reference_coordinates(coordinates.ufl_element())
-
+        element = create_element(expression.ufl_element())
         eval_args = evaluate_kernel.args[:-1]
 
         args = ", ".join(a.gencode(not_scope=True) for a in eval_args)
@@ -288,16 +292,20 @@ def prolong_kernel(expression):
         my_kernel = """
         %(to_reference)s
         %(evaluate)s
-        #include <stdio.h>
         void prolong_kernel(%(args)s, const double *X, const double *Xc)
         {
             double Xref[%(tdim)d];
             to_reference_coords_kernel(Xref, X, Xc);
+            for ( int i = 0; i < %(Rdim)d; i++ ) {
+                %(R)s[i] = 0;
+            }
             evaluate_kernel(%(arg_names)s, Xref);
         }
         """ % {"to_reference": str(to_reference_kernel),
                "evaluate": str(evaluate_kernel),
                "args": args,
+               "R": arg_names[0],
+               "Rdim": numpy.prod(element.value_shape),
                "arg_names": arg_names,
                "tdim": mesh.topological_dimension()}
 
@@ -308,6 +316,7 @@ def restrict_kernel(Vf, Vc):
     cache = Vf.ufl_domain()._shared_data_cache["transfer_kernels"]
     coordinates = Vc.ufl_domain().coordinates
     key = (("restrict", ) +
+           Vf.ufl_element().value_shape() +
            entity_dofs_key(Vf.finat_element.entity_dofs()) +
            entity_dofs_key(Vc.finat_element.entity_dofs()) +
            entity_dofs_key(coordinates.function_space().finat_element.entity_dofs()))
@@ -325,7 +334,6 @@ def restrict_kernel(Vf, Vc):
         my_kernel = """
         %(to_reference)s
         %(evaluate)s
-        #include <stdio.h>
         void restrict_kernel(%(args)s, const double *X, const double *Xc)
         {
             double Xref[%(tdim)d];
@@ -339,3 +347,66 @@ def restrict_kernel(Vf, Vc):
                "tdim": mesh.topological_dimension()}
 
         return cache.setdefault(key, op2.Kernel(my_kernel, name="restrict_kernel"))
+
+
+def inside_cell(cell, sym, epsilon=1e-8):
+    dim = cell.get_spatial_dimension()
+    point = tuple(sympy.Symbol("%s[%d]" % (sym, i)) for i in range(dim))
+    return " && ".join("(%s)" % arg for arg in cell.contains_point(point, epsilon=epsilon).args)
+
+
+def inject_kernel(Vc, Vf):
+    cache = Vf.ufl_domain()._shared_data_cache["transfer_kernels"]
+    coordinates = Vf.ufl_domain().coordinates
+    key = (("inject", ) +
+           Vf.ufl_element().value_shape() +
+           entity_dofs_key(Vf.finat_element.entity_dofs()) +
+           entity_dofs_key(coordinates.function_space().finat_element.entity_dofs()))
+    try:
+        return cache[key]
+    except KeyError:
+        hierarchy, level = utils.get_level(Vc.ufl_domain())
+        ncandidate = hierarchy._coarse_to_fine[level].shape[1]
+
+        coordinates = Vf.ufl_domain().coordinates
+        evaluate_kernel = compile_element(ufl.Coefficient(Vf))
+        to_reference_kernel = to_reference_coordinates(coordinates.ufl_element())
+        coords_element = create_element(coordinates.ufl_element())
+        Vf_element = create_element(Vf.ufl_element())
+        kernel = """
+        %(to_reference)s
+        %(evaluate)s
+
+        void inject_kernel(double *R, const double *X, const double *f, const double *Xf)
+        {
+            double Xref[%(tdim)d];
+            int cell = -1;
+            for (int i = 0; i < %(ncandidate)d; i++) {
+                const double *Xfi = Xf + i*%(Xf_cell_inc)d;
+                to_reference_coords_kernel(Xref, X, Xfi);
+                if (%(inside_cell)s) {
+                    cell = i;
+                    break;
+                }
+            }
+            if (cell == -1) {
+                abort();
+            }
+            const double *fi = f + cell*%(f_cell_inc)d;
+            for ( int i = 0; i < %(Rdim)d; i++ ) {
+                R[i] = 0;
+            }
+            evaluate_kernel(R, fi, Xref);
+        }
+        """ % {
+            "to_reference": str(to_reference_kernel),
+            "evaluate": str(evaluate_kernel),
+            "inside_cell": inside_cell(Vc.finat_element.cell, "Xref"),
+            "tdim": Vc.ufl_domain().topological_dimension(),
+            "ncandidate": ncandidate,
+            "Rdim": numpy.prod(Vf_element.value_shape),
+            "Xf_cell_inc": coords_element.space_dimension(),
+            "f_cell_inc": Vf_element.space_dimension()
+        }
+
+        return cache.setdefault(key, op2.Kernel(kernel, name="inject_kernel"))

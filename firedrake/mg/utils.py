@@ -45,6 +45,49 @@ def fine_node_to_coarse_node_map(Vf, Vc):
                                              values=fine_to_coarse_nodes))
 
 
+def coarse_node_to_fine_node_map(Vc, Vf):
+    if len(Vf) > 1:
+        assert len(Vf) == len(Vc)
+        return op2.MixedMap(coarse_node_to_fine_node_map(f, c) for f, c in zip(Vf, Vc))
+    mesh = Vc.mesh()
+    assert hasattr(mesh, "_shared_data_cache")
+    hierarchyf, levelf = get_level(Vf.ufl_domain())
+    hierarchyc, levelc = get_level(Vc.ufl_domain())
+
+    if hierarchyc != hierarchyf:
+        raise ValueError("Can't map across hierarchies")
+
+    hierarchy = hierarchyf
+    if levelc + 1 != levelf:
+        raise ValueError("Can't map between level %s and level %s" % (levelc, levelf))
+
+    key = (entity_dofs_key(Vc.finat_element.entity_dofs()) +
+           entity_dofs_key(Vf.finat_element.entity_dofs()) +
+           (levelc, levelf))
+
+    cache = mesh._shared_data_cache["hierarchy_coarse_node_to_fine_node_map"]
+    try:
+        return cache[key]
+    except KeyError:
+        # XXX: Rewrite in cython.
+        coarse_to_fine = hierarchy._coarse_to_fine[levelc]
+        fine_map = Vf.cell_node_map()
+        coarse_map = Vc.cell_node_map()
+
+        _, fcell_per_ccell = coarse_to_fine.shape
+
+        coarse_to_fine_nodes = numpy.zeros((coarse_map.toset.total_size,
+                                            fine_map.arity * fcell_per_ccell),
+                                           dtype=IntType)
+        for ccell, nodes in enumerate(coarse_map.values_with_halo):
+            fcells = coarse_to_fine[ccell]
+            coarse_to_fine_nodes[nodes, :] = fine_map.values_with_halo[fcells, :].reshape(-1)
+
+        return cache.setdefault(key, op2.Map(Vc.node_set, Vf.node_set,
+                                             fine_map.arity * fcell_per_ccell,
+                                             values=coarse_to_fine_nodes))
+
+
 def physical_node_locations(V):
     element = V.ufl_element()
     if element.value_shape():
