@@ -405,8 +405,13 @@ class Block(TensorBase):
         """Splits the function space and stores the component
         spaces determined by the indices.
         """
-        from firedrake.functionspace import FunctionSpace, MixedFunctionSpace
+        from firedrake.functionspace import (FunctionSpace, VectorFunctionSpace,
+                                             TensorFunctionSpace, MixedFunctionSpace)
         from firedrake.ufl_expr import Argument
+
+        fs = {0: FunctionSpace,
+              1: VectorFunctionSpace,
+              2: TensorFunctionSpace}
 
         tensor, = self.operands
         nargs = []
@@ -417,10 +422,9 @@ class Block(TensorBase):
             if len(idx) == 1:
                 fidx, = idx
                 W = V_is[fidx]
-                W = FunctionSpace(W.mesh(), W.ufl_element())
+                W = fs[W.rank](W.mesh(), W.ufl_element().family(), W.ufl_element().degree())
             else:
                 W = MixedFunctionSpace([V_is[fidx] for fidx in idx])
-
             nargs.append(Argument(W, arg.number(), part=arg.part()))
 
         return tuple(nargs)
