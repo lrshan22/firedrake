@@ -495,7 +495,15 @@ def slate_to_cpp(expr, temps, prec=None):
 
     elif isinstance(expr, slate.Inverse):
         tensor, = expr.operands
-        return "(%s).inverse()" % slate_to_cpp(tensor, temps)
+        shape = tensor.shape
+        if shape > (4, 4):
+            identity = "Eigen::Matrix<double, %d, %d>::Identity()" % shape
+            result = "(%s).colPivHouseholderQr().solve(%s)" % (slate_to_cpp(tensor, temps),
+                                                               identity)
+        else:
+            result = "(%s).inverse()" % slate_to_cpp(tensor, temps)
+
+        return result
 
     elif isinstance(expr, slate.Negative):
         tensor, = expr.operands
