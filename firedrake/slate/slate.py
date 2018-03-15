@@ -143,6 +143,11 @@ class TensorBase(object, metaclass=ABCMeta):
     def T(self):
         return Transpose(self)
 
+    def solve(self, b, method=None):
+        """
+        """
+        return Solve(self, b, method=method)
+
     def block(self, arg_indices):
         """Returns a block of the tensor defined on the component spaces
         described by indices.
@@ -826,18 +831,25 @@ class Solve(BinaryOp):
     """
     """
 
-    def __init__(self, A, b, method="colPivHouseholderQr"):
-        """
-        """
-        if method not in ["colPivHouseholderQr", "partialPivLu",
-                          "fullPivLu", "householderQr", "jacobiSvd",
-                          "fullPivHouseholderQr", "llt", "ldlt"]:
-            raise ValueError
+    def __new__(cls, A, b, method=None):
         if not isinstance(b, TensorBase):
             raise ValueError
 
+        if method is not None:
+            if method not in ["colPivHouseholderQr", "partialPivLu",
+                              "fullPivLu", "householderQr", "jacobiSvd",
+                              "fullPivHouseholderQr", "llt", "ldlt"]:
+                raise ValueError
+        else:
+            return A.inv * b
+
+        return super().__new__(cls)
+
+    def __init__(self, A, b, method=None):
+        """
+        """
+
         super(Solve, self).__init__(A, b)
-        self.operands = (A, b)
         self.method = method
 
         # Temporary expression to simplify code for now
