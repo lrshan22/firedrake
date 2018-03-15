@@ -34,7 +34,7 @@ from ufl.form import Form
 
 __all__ = ['AssembledVector', 'Block', 'Tensor',
            'Inverse', 'Transpose', 'Negative',
-           'Add', 'Mul']
+           'Add', 'Mul', 'Solve']
 
 
 class RemoveNegativeRestrictions(MultiFunction):
@@ -725,7 +725,8 @@ class BinaryOp(TensorOp):
     def _output_string(self, prec=None):
         """Creates a string representation of the binary operation."""
         ops = {Add: '+',
-               Mul: '*'}
+               Mul: '*',
+               Solve: '\\'}
         if prec is None or self.prec >= prec:
             par = lambda x: x
         else:
@@ -821,12 +822,46 @@ class Mul(BinaryOp):
         return self._args
 
 
+class Solve(BinaryOp):
+    """
+    """
+
+    def __init__(self, A, b, method="colPivHouseholderQr"):
+        """
+        """
+        if method not in ["colPivHouseholderQr", "partialPivLu",
+                          "fullPivLu", "householderQr", "jacobiSvd",
+                          "fullPivHouseholderQr", "llt", "ldlt"]:
+            raise ValueError
+        if not isinstance(b, TensorBase):
+            raise ValueError
+
+        super(Solve, self).__init__(A, b)
+        self.operands = (A, b)
+        self.method = method
+
+        # Temporary expression to simplify code for now
+        self._tempexpr = A.inv * b
+
+    def arg_function_spaces(self):
+        """Returns a tuple of function spaces that the tensor
+        is defined on.
+        """
+        expr = self._tempexpr
+        return expr.arg_function_spaces()
+
+    def arguments(self):
+        """Returns a tuple of arguments associated with the tensor."""
+        return self._tempexpr.arguments()
+
+
 # Establishes levels of precedence for Slate tensors
 precedences = [
     [AssembledVector, Block, Tensor],
     [UnaryOp],
     [Add],
-    [Mul]
+    [Mul],
+    [Solve]
 ]
 
 # Here we establish the precedence class attribute for a given
