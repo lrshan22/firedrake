@@ -552,6 +552,8 @@ def slate_to_cpp(expr, temps, prec=None):
                                           method,
                                           slate_to_cpp(b, temps, expr.prec))
 
+        return parenthesize(result, expr.prec, prec)
+
     else:
         raise NotImplementedError("Type %s not supported.", type(expr))
 
