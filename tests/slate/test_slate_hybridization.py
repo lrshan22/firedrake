@@ -57,7 +57,8 @@ def test_slate_hybridization(degree, hdiv_family, quadrilateral):
               'pc_python_type': 'firedrake.HybridizationPC',
               'hybridization': {'ksp_type': 'preonly',
                                 'pc_type': 'lu'}}
-    solve(a == L, w, solver_parameters=params)
+    solve(a == L, w, solver_parameters=params,
+          appctx={'hybridization_local_backsolve': 'colPivHouseholderQr'})
     sigma_h, u_h = w.split()
 
     # (Non-hybrid) Need to slam it with preconditioning due to the
