@@ -113,8 +113,8 @@ def test_arguments(mass, stiffness, load, boundary_load, zero_rank_tensor):
     assert len(S.arguments()) == S.rank
     assert S.arguments() == ()
     assert (M.T).arguments() == (u, v)
-    assert (N.inv).arguments() == (u, v)
-    assert (N.T + M.inv).arguments() == (u, v)
+    assert (N.inv()).arguments() == (u, v)
+    assert (N.T + M.inv()).arguments() == (u, v)
     assert (F.T).arguments() == (v,)
     assert (F.T + G.T).arguments() == (v,)
     assert (M*F).arguments() == (v,)
@@ -147,8 +147,8 @@ def test_coefficients(mass, stiffness, load, boundary_load, zero_rank_tensor):
     assert (N*G).coefficients() == (g,)
     assert (N*F + M*G).coefficients() == (f, g)
     assert (M.T).coefficients() == ()
-    assert (M.inv).coefficients() == ()
-    assert (M.T + N.inv).coefficients() == ()
+    assert (M.inv()).coefficients() == ()
+    assert (M.T + N.inv()).coefficients() == ()
     assert (F.T).coefficients() == (f,)
     assert (G.T).coefficients() == (g,)
     assert (F + G).coefficients() == (f, g)
@@ -179,7 +179,7 @@ def test_integral_information(mass, stiffness, load, boundary_load, zero_rank_te
     assert N.ufl_domain() == N.form.ufl_domain()
     assert F.ufl_domain() == F.form.ufl_domain()
     assert G.ufl_domain() == G.form.ufl_domain()
-    assert M.inv.ufl_domain() == M.form.ufl_domain()
+    assert M.inv().ufl_domain() == M.form.ufl_domain()
     assert M.T.ufl_domain() == M.form.ufl_domain()
     assert (-N).ufl_domain() == N.form.ufl_domain()
     assert (F + G).ufl_domain() == (F.form + G.form).ufl_domain()
@@ -189,7 +189,7 @@ def test_integral_information(mass, stiffness, load, boundary_load, zero_rank_te
     assert N.subdomain_data() == N.form.subdomain_data()
     assert M.subdomain_data() == M.form.subdomain_data()
     assert F.subdomain_data() == F.form.subdomain_data()
-    assert N.inv.subdomain_data() == N.form.subdomain_data()
+    assert N.inv().subdomain_data() == N.form.subdomain_data()
     assert (-M).subdomain_data() == M.form.subdomain_data()
     assert (M + N).T.subdomain_data() == (M.form + N.form).subdomain_data()
     assert (F + G).subdomain_data() == (F.form + G.form).subdomain_data()
@@ -210,7 +210,7 @@ def test_equality_relations(function_space):
     assert B * f != A * f
     assert A + B == Tensor(u * v * dx) + Tensor(inner(grad(u), grad(v)) * dx)
     assert A*B != B*A
-    assert B.T != B.inv
+    assert B.T != B.inv()
     assert A != -A
 
 
@@ -361,7 +361,7 @@ def test_illegal_inverse():
     v = TestFunction(DG)
     A = Tensor(v * div(sigma) * dx)
     with pytest.raises(AssertionError):
-        A.inv
+        A.inv()
 
 
 def test_illegal_compile():

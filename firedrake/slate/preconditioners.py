@@ -196,11 +196,11 @@ class HybridizationPC(PCBase):
         # Assemble the Schur complement operator and right-hand side
         self.schur_rhs = Function(TraceSpace)
         self._assemble_Srhs = create_assembly_callable(
-            K * Atilde.inv * AssembledVector(self.broken_residual),
+            K * Atilde.inv() * AssembledVector(self.broken_residual),
             tensor=self.schur_rhs,
             form_compiler_parameters=self.cxt.fc_params)
 
-        schur_comp = K * Atilde.inv * K.T
+        schur_comp = K * Atilde.inv() * K.T
         self.S = allocate_matrix(schur_comp, bcs=trace_bcs,
                                  form_compiler_parameters=self.cxt.fc_params)
         self._assemble_S = create_assembly_callable(schur_comp,
@@ -277,12 +277,12 @@ class HybridizationPC(PCBase):
         u = split_sol[id1]
         lambdar = AssembledVector(self.trace_solution)
 
-        M = D - C * A.inv * B
-        R = K_1.T - C * A.inv * K_0.T
+        M = D - C * A.inv() * B
+        R = K_1.T - C * A.inv() * K_0.T
 
         method = self.app_cxt.get("hybridization_local_backsolve", None)
 
-        u_rec = M.solve(f - C * A.inv * g - R * lambdar, method=method)
+        u_rec = M.solve(f - C * A.inv() * g - R * lambdar, method=method)
         self._sub_unknown = create_assembly_callable(u_rec,
                                                      tensor=u,
                                                      form_compiler_parameters=self.cxt.fc_params)

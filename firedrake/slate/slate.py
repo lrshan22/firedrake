@@ -846,7 +846,7 @@ class Solve(BinaryOp):
                               "fullPivHouseholderQr", "llt", "ldlt"]:
                 raise ValueError
         else:
-            return A.inv * b
+            return A.inv(factorization=None) * b
 
         return super().__new__(cls)
 
@@ -858,7 +858,7 @@ class Solve(BinaryOp):
         self.method = method
 
         # Temporary expression to simplify code for now
-        self._tempexpr = A.inv * b
+        self._tempexpr = A.inv() * b
 
     def arg_function_spaces(self):
         """Returns a tuple of function spaces that the tensor

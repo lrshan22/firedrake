@@ -17,7 +17,7 @@ def test_left_inverse(mesh):
     form = u*v*dx
 
     A = Tensor(form)
-    Result = assemble(A.inv * A)
+    Result = assemble(A.inv() * A)
     nnode = V.node_count
     assert (Result.M.values - np.identity(nnode) <= 1e-13).all()
 
@@ -30,7 +30,7 @@ def test_right_inverse(mesh):
     form = u*v*dx
 
     A = Tensor(form)
-    Result = assemble(A * A.inv)
+    Result = assemble(A * A.inv())
     nnode = V.node_count
     assert (Result.M.values - np.identity(nnode) <= 1e-13).all()
 
@@ -96,7 +96,7 @@ def test_aggressive_unaryop_nesting():
     B = Tensor(2.0*u*v*dx)
 
     # This is a very silly way to write the vector of ones
-    foo = (B.T*A.inv).T*G + (-A.inv.T*B.T).inv*F + B.inv*(A.T).T*F
+    foo = (B.T*A.inv()).T*G + (-A.inv().T*B.T).inv()*F + B.inv()*(A.T).T*F
     assert np.allclose(assemble(foo).dat.data, np.ones(V.node_count))
 
 
