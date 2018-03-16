@@ -496,11 +496,13 @@ def slate_to_cpp(expr, temps, prec=None):
     elif isinstance(expr, slate.Inverse):
         tensor, = expr.operands
         shape = tensor.shape
-        if shape > (4, 4):
+        if expr._factorization:
             identity = "Eigen::Matrix<double, %d, %d>::Identity()" % shape
-            result = "(%s).colPivHouseholderQr().solve(%s)" % (slate_to_cpp(tensor, temps),
-                                                               identity)
+            result = "(%s).%s().solve(%s)" % (slate_to_cpp(tensor, temps),
+                                              expr._factorization,
+                                              identity)
         else:
+            # Defaults to full-pivot LU
             result = "(%s).inverse()" % slate_to_cpp(tensor, temps)
 
         return result

@@ -135,9 +135,8 @@ class TensorBase(object, metaclass=ABCMeta):
         """
         return any(len(fs) > 1 for fs in self.arg_function_spaces())
 
-    @property
-    def inv(self):
-        return Inverse(self)
+    def inv(self, factorization=None):
+        return Inverse(self, factorization=factorization)
 
     @property
     def T(self):
@@ -634,13 +633,19 @@ class Inverse(UnaryOp):
        This class will raise an error if the tensor is not square.
     """
 
-    def __init__(self, A):
+    def __init__(self, A, factorization=None):
         """Constructor for the Inverse class."""
         assert A.rank == 2, "The tensor must be rank 2."
         assert A.shape[0] == A.shape[1], (
             "The inverse can only be computed on square tensors."
         )
+        if factorization is not None:
+            if factorization not in ["colPivHouseholderQr", "partialPivLu",
+                                     "fullPivLu", "householderQr", "jacobiSvd",
+                                     "fullPivHouseholderQr", "llt", "ldlt"]:
+                raise ValueError
         super(Inverse, self).__init__(A)
+        self._factorization = factorization
 
     def arg_function_spaces(self):
         """Returns a tuple of function spaces that the tensor
