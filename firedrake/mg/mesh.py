@@ -12,7 +12,8 @@ __all__ = ["MeshHierarchy", "ExtrudedMeshHierarchy"]
 
 
 class MeshHierarchy(object):
-    def __init__(self, m, refinement_levels, refinements_per_level=1, reorder=None):
+    def __init__(self, m, refinement_levels, refinements_per_level=1, reorder=None,
+                 callbacks=None):
         """Build a hierarchy of meshes by uniformly refining a coarse mesh.
 
         :arg m: the coarse :func:`~.Mesh` to refine
@@ -23,6 +24,8 @@ class MeshHierarchy(object):
             mesh hierarchy skips them.
         :arg reorder: optional flag indicating whether to reorder the
              refined meshes.
+        :arg callbacks: A 2-tuple of callbacks to call before and after refinement of the DM.
+           Receives as arguments the DM and the current refinement level.
         """
         from firedrake_citations import Citations
         Citations().register("Mitchell2016")
@@ -38,8 +41,21 @@ class MeshHierarchy(object):
         fpoint_ises = []
         if m.comm.size > 1 and m._grown_halos:
             raise RuntimeError("Cannot refine parallel overlapped meshes (make sure the MeshHierarchy is built immediately after the Mesh)")
+        if callbacks is not None:
+            before, after = callbacks
+        else:
+            before = None
+            after = None
+
+        if before is None:
+            before = lambda dm, i: pass
+        if after is None:
+            after = lambda dm, i: pass
+
         for i in range(refinement_levels*refinements_per_level):
+            before(cdm, i)
             rdm = cdm.refine()
+            after(rdm, i)
             fpoint_ises.append(cdm.createCoarsePointIS())
             # Remove interior facet label (re-construct from
             # complement of exterior facets).  Necessary because the
